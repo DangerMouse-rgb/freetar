@@ -126,11 +126,59 @@ class Search:
         results = data['store']['page']['data'].get('results', [])
         return [SearchResult(r) for r in results if r.get("type") not in ("Pro", "Official", None)]
 
-def get_chords(s: SongDetail):
-    if not s.appliciture:
-        return {}, {}
-    # ... (Keep your existing get_chords logic here) ...
-    return {}, {} # Placeholder: retain your original complex logic here
+def get_chords(s: SongDetail) -> SongDetail:
+    if s.appliciture is None:
+        return dict(), dict()
+
+    chords = {}
+    fingerings = {}
+
+    for chord in s.appliciture:
+        for chord_variant in s.appliciture[chord]:
+            frets = chord_variant["frets"]
+            min_fret = min(frets)
+            max_fret = max(frets)
+            possible_frets = list(range(min_fret, max_fret+1))
+            variants_temp = {
+                possible_fret: [1 if b == possible_fret else 0 for b in frets][::-1]
+                for possible_fret
+                in possible_frets
+                if possible_fret > 0
+            }
+
+            variants = dict()
+            found = False
+            for fret, fingers in variants_temp.items():
+                try:
+                    if not found and fingers.index(1) >= 0:
+                        found = True
+                except ValueError:
+                    ...
+
+                if found:
+                    variants[fret] = fingers
+
+            if not len(variants):
+                continue
+            while len(variants) < 6:
+                variants[max(variants) + 1] = [0] * 6
+
+            variant_strings_pressed = [*variants.values()]
+            variant_strings_pressed = [sum(x) for x in zip(*variant_strings_pressed)]
+            unstrummed_strings = [int(not bool(y)) for y in variant_strings_pressed]
+
+            fingering_for_variant = []
+            for finger, x in zip(chord_variant["fingers"][::-1], unstrummed_strings):
+                fingering_for_variant.append("x" if x else finger)
+            fingering_for_variant = fingering_for_variant
+
+            if chord not in chords:
+                chords[chord] = []
+                fingerings[chord] = []
+            chords[chord].append(variants)
+            fingerings[chord].append(fingering_for_variant)
+
+    return chords, fingerings
 
 def ug_tab(url_path: str):
     try:
@@ -143,7 +191,10 @@ def ug_tab(url_path: str):
         data = json.loads(data_div.attrs['data-content'])
         
         s = SongDetail(data)
-        # Note: assuming get_chords is properly implemented as per your original file
+        
+        # This is the missing link that populates the chord diagrams
+        s.chords, s.fingers_for_strings = get_chords(s)
+        
         return s
     except Exception as e:
         raise FreetarError(f"Could not parse chord: {e}")
